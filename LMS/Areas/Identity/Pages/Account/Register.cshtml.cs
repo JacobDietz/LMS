@@ -116,12 +116,19 @@ namespace LMS.Areas.Identity.Pages.Account
             ExternalLogins = (await _signInManager.GetExternalAuthenticationSchemesAsync()).ToList();
             if (ModelState.IsValid)
             {
-                var uid = CreateNewUser(Input.FirstName, Input.LastName, Input.DOB, Input.Department, Input.Role);
+                var uid = GenerateUniqueUid();
                 var user = new ApplicationUser { UserName = uid };
                 await _userStore.SetUserNameAsync(user, uid, CancellationToken.None);
                 var result = await _userManager.CreateAsync(user, Input.Password);
                 if (result.Succeeded)
                 {
+                    if (!CreateNewUser(uid, Input.FirstName, Input.LastName, Input.DOB, Input.Department, Input.Role))
+                    {
+                        await _userManager.DeleteAsync(user);
+                        ModelState.AddModelError(string.Empty, "Unable to create the LMS user record.");
+                        return Page();
+                    }
+
                     _logger.LogInformation("User created a new account with password.");
                     await _userManager.AddToRoleAsync(user, Input.Role);
                     var userId = await _userManager.GetUserIdAsync(user);
@@ -160,9 +167,11 @@ namespace LMS.Areas.Identity.Pages.Account
         /// <param name="departmentAbbrev">The department abbreviation that the user belongs to (ignore for Admins) </param>
         /// <param name="role">The user's role: one of "Administrator", "Professor", "Student"</param>
         /// <returns>The uID of the new user</returns>
-        string CreateNewUser(string firstName, string lastName, DateTime dob, string departmentAbbrev, string role)
+        bool CreateNewUser(string uid, string firstName, string lastName, DateTime dob, string departmentAbbrev, string role)
         {
-            string uid = "u" + new Random().Next(1000000, 9999999).ToString();
+            if (role != "Administrator" && !db.Departments.Any(d => d.Subject == departmentAbbrev))
+                return false;
+
             if (role == "Student")
             {
                 db.Students.Add(new Student
@@ -195,7 +204,28 @@ namespace LMS.Areas.Identity.Pages.Account
                     Dob = DateOnly.FromDateTime(dob)
                 });
             }
+            else
+            {
+                return false;
+            }
+
             db.SaveChanges();
+            return true;
+        }
+
+        string GenerateUniqueUid()
+        {
+            string uid;
+
+            do
+            {
+                uid = "u" + new Random().Next(1000000, 9999999).ToString();
+            }
+            while (_userManager.Users.Any(u => u.UserName == uid)
+                   || db.Students.Any(s => s.UId == uid)
+                   || db.Professors.Any(p => p.UId == uid)
+                   || db.Administrators.Any(a => a.UId == uid));
+
             return uid;
         }
         /*******End code to modify********/
